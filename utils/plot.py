@@ -80,3 +80,13 @@ class Plotter:
                 print(dir)
 
         return sorted(names)
+
+if __name__ == '__main__':
+    """Usage: plot.py LOG_PATH FIG_PATH"""
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    import sys
+    plt.figure()
+    Plotter().plot_results([sys.argv[1]])
+    plt.savefig(sys.argv[2])

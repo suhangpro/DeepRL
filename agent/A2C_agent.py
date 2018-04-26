@@ -26,6 +26,9 @@ class A2CAgent(BaseAgent):
         self.episode_rewards = np.zeros(config.num_workers)
         self.last_episode_rewards = np.zeros(config.num_workers)
 
+        if hasattr(self.network, 'is_rnn') and self.network.is_rnn:
+            self.network.rnn_reset_state(np.ones(config.num_workers, dtype=np.int))
+
     def iteration(self):
         config = self.config
         rollout = []
@@ -34,6 +37,8 @@ class A2CAgent(BaseAgent):
             prob, log_prob, value = self.network.predict(config.state_normalizer(states))
             actions = [self.policy.sample(p) for p in prob.cpu().detach().numpy()]
             next_states, rewards, terminals, _ = self.task.step(actions)
+            if hasattr(self.network, 'is_rnn') and self.network.is_rnn:
+                self.network.rnn_reset_state(terminals)
             self.episode_rewards += rewards
             rewards = config.reward_normalizer(rewards)
             for i, terminal in enumerate(terminals):
@@ -79,6 +84,9 @@ class A2CAgent(BaseAgent):
          config.value_loss_weight * value_loss).mean().backward()
         nn.utils.clip_grad_norm_(self.network.parameters(), config.gradient_clip)
         self.optimizer.step()
+
+        if hasattr(self.network, 'is_rnn') and self.network.is_rnn:
+            self.network.rnn_detach_state()
 
         self.evaluate(config.rollout_length)
 
