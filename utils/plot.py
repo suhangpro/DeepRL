@@ -52,13 +52,18 @@ class Plotter:
             xy_list = [self.window_func(x, y, episode_window, np.mean) for x, y in xy_list]
         return xy_list
 
-    def plot_results(self, dirs, max_timesteps=1e8, x_axis=X_TIMESTEPS, episode_window=100, title=None):
+    def plot_results(self, dirs, max_timesteps=1e8, x_axis=X_TIMESTEPS, episode_window=100, title=None, labels=None):
         import matplotlib.pyplot as plt
         plt.ticklabel_format(axis='x', style='sci', scilimits=(1, 1))
         xy_list = self.load_results(dirs, max_timesteps, x_axis, episode_window)
+        if type(labels) == str:
+            labels = [labels] * len(dirs)
+        elif labels is None:
+            labels = dirs
         for (i, (x, y)) in enumerate(xy_list):
             color = Plotter.COLORS[i]
-            plt.plot(x, y, color=color)
+            plt.plot(x, y, color=color, label=labels[i])
+        plt.legend()
         plt.xlabel(x_axis)
         plt.ylabel("Episode Rewards")
         if title is not None:
@@ -86,7 +91,14 @@ if __name__ == '__main__':
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
-    import sys
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('log_root')
+    parser.add_argument('out_path')
+    parser.add_argument('--pattern', default='', type=str)
+    parser.add_argument('--neg_pattern', default=' ', type=str)
+    args = parser.parse_args()
     plt.figure()
-    Plotter().plot_results([sys.argv[1]])
-    plt.savefig(sys.argv[2])
+    plotter = Plotter()
+    plotter.plot_results(plotter.load_log_dirs(args.pattern, args.neg_pattern, root=args.log_root))
+    plt.savefig(args.out_path)
