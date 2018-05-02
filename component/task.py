@@ -4,7 +4,7 @@
 # declaration at the top                                              #
 #######################################################################
 import gym
-import sys
+import os
 import numpy as np
 from .atari_wrapper import *
 import multiprocessing as mp
@@ -15,11 +15,13 @@ import datetime
 import uuid
 
 class BaseTask:
-    def set_monitor(self, env, log_dir):
+    def set_monitor(self, env, log_dir, worker_id=None):
         if log_dir is None:
             return env
         mkdir(log_dir)
-        return Monitor(env, '%s/%s' % (log_dir, uuid.uuid4()))
+        prefix_str = str(uuid.uuid4()) if worker_id is None else str(worker_id)
+        return Monitor(env, os.path.join(log_dir, prefix_str))
+        # return Monitor(env, '%s/%s' % (log_dir, uuid.uuid4()))
 
     def reset(self):
         return self.env.reset()
@@ -42,14 +44,14 @@ class ClassicalControl(BaseTask):
 
 class PixelAtari(BaseTask):
     def __init__(self, name, seed=0, log_dir=None,
-                 frame_skip=4, history_length=4, dataset=False):
+                 frame_skip=4, history_length=4, dataset=False, worker_id=None):
         BaseTask.__init__(self)
         env = make_atari(name, frame_skip)
         env.seed(seed)
         if dataset:
             env = DatasetEnv(env)
             self.dataset_env = env
-        env = self.set_monitor(env, log_dir)
+        env = self.set_monitor(env, log_dir, worker_id)
         env = wrap_deepmind(env, history_length=history_length)
         self.env = env
         self.action_dim = self.env.action_space.n
@@ -151,7 +153,10 @@ def sub_task(parent_pipe, pipe, task_fn, rank, log_dir):
     np.random.seed()
     seed = np.random.randint(0, sys.maxsize)
     parent_pipe.close()
-    task = task_fn(log_dir=log_dir)
+    if rank is None:
+        task = task_fn(log_dir=log_dir)
+    else:
+        task = task_fn(log_dir=log_dir, worker_id=rank)
     task.seed(seed)
     while True:
         op, data = pipe.recv()
@@ -168,15 +173,25 @@ def sub_task(parent_pipe, pipe, task_fn, rank, log_dir):
         else:
             assert False, 'Unknown Operation'
 
+def stack_lists_of_ndarray(x):
+    """
+    :param x: a tuple of lists of numpy arrays
+    :return: a list of numpy arrays
+    """
+    assert type(x[0][0]) == np.ndarray
+    return [np.stack(x[i][j] for i in range(len(x))) for j in range(len(x[0]))]
+
 class ParallelizedTask:
-    def __init__(self, task_fn, num_workers, log_dir=None):
+    def __init__(self, task_fn, num_workers, log_dir=None, worker_ids=None):
         self.task_fn = task_fn
-        self.task = task_fn(log_dir=None)
+        self.task = task_fn(log_dir=None, worker_id=(worker_ids[0] if worker_ids is not None else None))
         self.name = self.task.name
         if log_dir is not None:
             mkdir(log_dir)
+        if worker_ids is None:
+            worker_ids = [None] * num_workers
         self.pipes, worker_pipes = zip(*[mp.Pipe() for _ in range(num_workers)])
-        args = [(p, wp, task_fn, rank, log_dir)
+        args = [(p, wp, task_fn, worker_ids[rank], log_dir)
                 for rank, (p, wp) in enumerate(zip(self.pipes, worker_pipes))]
         self.workers = [mp.Process(target=sub_task, args=arg) for arg in args]
         for p in self.workers: p.start()
@@ -188,7 +203,8 @@ class ParallelizedTask:
         for pipe, action in zip(self.pipes, actions):
             pipe.send(('step', action))
         results = [p.recv() for p in self.pipes]
-        results = map(lambda x: np.stack(x), zip(*results))
+        # results = map(lambda x: np.stack(x), zip(*results))
+        results = map(lambda x: (np.stack(x) if type(x[0]) != list else stack_lists_of_ndarray(x)), zip(*results))
         return results
 
     def reset(self, i=None):
@@ -199,7 +215,9 @@ class ParallelizedTask:
         else:
             self.pipes[i].send(('reset', None))
             results = self.pipes[i].recv()
-        return np.stack(results)
+        # return np.stack(results)
+        results = np.stack(results) if type(results[0]) != list else stack_lists_of_ndarray(results)
+        return results
 
     def close(self):
         for pipe in self.pipes:

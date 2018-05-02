@@ -165,14 +165,17 @@ def a2c_pixel_atari(name):
     run_iterations(A2CAgent(config))
 
 def a2c_lstm_pixel_atari(name):
-    config = Config()
+    config = MultiGPUConfig()
     config.history_length = 4
     config.num_workers = 16
-    task_fn = lambda log_dir: PixelAtari(name, frame_skip=4, history_length=config.history_length, log_dir=log_dir)
-    config.task_fn = lambda: ParallelizedTask(task_fn, config.num_workers, log_dir=get_default_log_dir(a2c_lstm_pixel_atari.__name__))
+    task_fn = lambda log_dir, worker_id: PixelAtari(name, frame_skip=4, history_length=config.history_length,
+                                                    log_dir=log_dir, worker_id=worker_id)
+    config.task_fn = lambda: ParallelizedTask(task_fn, config.num_workers,
+                                              log_dir=get_default_log_dir(a2c_lstm_pixel_atari.__name__),
+                                              worker_ids=range(config.num_workers))
     config.optimizer_fn = lambda params: torch.optim.RMSprop(params, lr=0.0007)
     config.network_fn = lambda state_dim, action_dim: \
-        ActorCriticLSTM(action_dim, NatureConvBody(), gpu=0)
+        ActorCriticLSTM(action_dim, NatureConvBody(), use_internal_state=False, gpu=config.gpus[0])
     config.policy_fn = SamplePolicy
     config.state_normalizer = ImageNormalizer()
     config.reward_normalizer = SignNormalizer()
@@ -183,7 +186,7 @@ def a2c_lstm_pixel_atari(name):
     config.rollout_length = 5
     config.gradient_clip = 0.5
     config.logger = Logger('./log', logger, skip=True)
-    run_iterations(A2CAgent(config))
+    run_iterations(A2C(config))
 
 def categorical_dqn_pixel_atari(name):
     config = Config()
@@ -383,13 +386,10 @@ def action_conditional_video_prediction():
 
 
 if __name__ == '__main__':
-    mkdir('data')
     mkdir('data/video')
     mkdir('dataset')
     mkdir('log')
-    os.system('export OMP_NUM_THREADS=1')
-    os.system('export MKL_NUM_THREADS=1')
-    torch.set_num_threads(1)
+    set_one_thread()
     # logger.setLevel(logging.DEBUG)
     logger.setLevel(logging.INFO)
 
