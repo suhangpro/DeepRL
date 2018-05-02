@@ -117,3 +117,53 @@ def layer_init(layer, w_scale=1.0):
     layer.weight.data.mul_(w_scale)
     nn.init.constant_(layer.bias.data, 0)
     return layer
+
+def weights_init(m):
+    classname = m.__class__.__name__
+    if classname.find('Conv') != -1:
+        weight_shape = list(m.weight.data.size())
+        fan_in = np.prod(weight_shape[1:4])
+        fan_out = np.prod(weight_shape[2:4]) * weight_shape[0]
+        w_bound = np.sqrt(6. / (fan_in + fan_out))
+        m.weight.data.uniform_(-w_bound, w_bound)
+        if m.bias is not None:
+            m.bias.data.fill_(0)
+    elif classname.find('Linear') != -1:
+        weight_shape = list(m.weight.data.size())
+        fan_in = weight_shape[1]
+        fan_out = weight_shape[0]
+        w_bound = np.sqrt(6. / (fan_in + fan_out))
+        m.weight.data.uniform_(-w_bound, w_bound)
+        if m.bias is not None:
+            m.bias.data.fill_(0)
+    elif classname.find('LSTMCell') != -1:
+        nn.init.orthogonal_(m.weight_ih.data)
+        nn.init.orthogonal_(m.weight_hh.data)
+        m.bias_ih.data.fill_(0)
+        m.bias_hh.data.fill_(0)
+    elif classname.find('Embedding') != -1:
+        nn.init.orthogonal_(m.weight)
+
+
+class RNNDataParallel(nn.DataParallel):
+    def __init__(self, m, device_ids, batch_size, rnn_hidden_size):
+        self.batch_size = batch_size
+        self.rnn_hidden_size = rnn_hidden_size
+        self.state_device = torch.device('cuda:%d' % (device_ids[0]))
+        self.hx = torch.zeros(batch_size, rnn_hidden_size, device=self.state_device, dtype=torch.float32)
+        self.cx = torch.zeros_like(self.hx)
+        super(RNNDataParallel, self).__init__(m, device_ids=device_ids)
+
+    def rnn_reset_state(self, worker_mask):
+        worker_mask = torch.tensor(worker_mask[:, np.newaxis].astype(np.int), dtype=torch.float32).to(self.state_device)
+        self.hx = self.hx * worker_mask
+        self.cx = self.cx * worker_mask
+
+    def rnn_detach_state(self):
+        self.hx = self.hx.detach()
+        self.cx = self.cx.detach()
+
+    def forward(self, *inputs):
+        rets = super(RNNDataParallel, self).forward(*inputs, self.hx, self.cx)
+        self.hx, self.cx = rets[-2:]
+        return rets[:-2]

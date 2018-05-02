@@ -5,6 +5,7 @@
 #######################################################################
 import torch
 import numpy as np
+import cv2
 
 class BaseNormalizer:
     def __init__(self, read_only=False):
@@ -91,3 +92,36 @@ class ImageNormalizer(RescaleNormalizer):
 class SignNormalizer(BaseNormalizer):
     def __call__(self, x):
         return np.sign(x)
+
+class ImagenetNormalizer(BaseNormalizer):
+    def __init__(self,
+                 is_hwc=False,
+                 is_bgr=False,
+                 dtype=np.float32,
+                 range_max=255,
+                 rgb_mean=(0.485, 0.456, 0.406),
+                 rgb_std=(0.229, 0.224, 0.225),
+                 resize_hw=(224, 224)):
+        BaseNormalizer.__init__(self)
+        self.range_max = range_max
+        self.rgb_mean = np.array(rgb_mean, dtype=dtype).reshape(3, 1, 1)
+        self.rgb_std = np.array(rgb_std, dtype=dtype).reshape(3, 1, 1)
+        self.is_hwc = is_hwc
+        self.is_bgr = is_bgr
+        self.dtype = dtype
+        self.resize_hw = resize_hw
+
+    def __call__(self, x):
+        if not self.is_hwc:
+            x = x.transpose(1, 2, 0)
+        if self.resize_hw is not None and (x.shape[0] != self.resize_hw[0] or x.shape[1] != self.resize_hw[1]):
+            x = cv2.resize(x, self.resize_hw)
+            x = np.maximum(0, np.minimum(self.range_max, x))  # resize might result in expanded range
+        if self.is_bgr:
+            x = x[:, :, -1]
+        x = x.astype(self.dtype) * 1.0 / self.range_max
+        x = np.divide(x - self.rgb_mean, self.rgb_std)
+
+        if self.is_hwc:
+            x = x.transpose(2, 0, 1)
+        return x

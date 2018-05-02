@@ -3,6 +3,7 @@
 # Permission given to modify the code as long as you keep this        #
 # declaration at the top                                              #
 #######################################################################
+import torch
 from .normalizer import *
 
 class Config:
@@ -59,3 +60,10 @@ class Config:
         self.test_interval = 0
         self.test_repetitions = 10
         self.evaluation_env = None
+
+
+class MultiGPUConfig(Config):
+    def __init__(self):
+        super(MultiGPUConfig, self).__init__()
+        cuda_visible_gpus = list(range(torch.cuda.device_count()))
+        self.gpus = cuda_visible_gpus
