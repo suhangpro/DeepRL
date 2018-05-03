@@ -23,11 +23,9 @@ class A2C(BaseAgent):
                                                device_ids=config.gpus)
 
         if hasattr(config.state_normalizer, 'multi_state') and config.state_normalizer.multi_state:
-            # self.network_pred_fn = lambda x: self.network(*[torch.tensor(xx, dtype=torch.float32).to(self.base_device) for xx in x])
-            self.network_pred_fn = lambda x: self.network(*[self.to_tensor(xx) for xx in x])
+            self.network_pred_fn = lambda x: self.network(*[self._to_tensor(xx) for xx in x])
         else:
-            # self.network_pred_fn = lambda x: self.network(torch.tensor(x, dtype=torch.float32).to(self.base_device))
-            self.network_pred_fn = lambda x: self.network(self.to_tensor(x))
+            self.network_pred_fn = lambda x: self.network(self._to_tensor(x))
         self.optimizer = config.optimizer_fn(self.network.parameters())
         self.policy = config.policy_fn()
         self.total_steps = 0
@@ -38,7 +36,7 @@ class A2C(BaseAgent):
         if self.is_rnn:
             self.network.rnn_reset_state(np.ones(config.num_workers, dtype=np.int))
 
-    def to_tensor(self, x, dtype=torch.float32):
+    def _to_tensor(self, x, dtype=torch.float32):
         return torch.tensor(x, dtype=dtype).to(self.base_device)
 
     def iteration(self):
@@ -66,13 +64,13 @@ class A2C(BaseAgent):
         rollout.append([None, None, pending_value, None, None, None])
 
         processed_rollout = [None] * (len(rollout) - 1)
-        advantages = self.to_tensor(np.zeros((config.num_workers, 1)))
+        advantages = self._to_tensor(np.zeros((config.num_workers, 1)))
         returns = pending_value.detach()
         for i in reversed(range(len(rollout) - 1)):
             prob, log_prob, value, actions, rewards, terminals = rollout[i]
-            terminals = self.to_tensor(terminals).unsqueeze(1)
-            rewards = self.to_tensor(rewards).unsqueeze(1)
-            actions = self.to_tensor(actions, dtype=torch.int64).unsqueeze(1).long()
+            terminals = self._to_tensor(terminals).unsqueeze(1)
+            rewards = self._to_tensor(rewards).unsqueeze(1)
+            actions = self._to_tensor(actions, dtype=torch.int64).unsqueeze(1).long()
             next_value = rollout[i + 1][2]
             returns = rewards + config.discount * terminals * returns
             if not config.use_gae:
